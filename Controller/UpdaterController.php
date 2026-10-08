@@ -25,7 +25,14 @@ class UpdaterController extends BaseController
     {
         $this->requireAdmin();
         $state = (new Bootstrapper($this->container))->state(PLUGINS_DIR);
-        $target = $state['self_updating'] ? null : ((new DirectoryClient($this->container))->catalogMap()['ModMenu']['version'] ?? null);
+        $target = null;
+        if (! $state['self_updating']) {
+            try {
+                $target = (new DirectoryClient($this->container))->catalogMap()['ModMenu']['version'] ?? null;
+            } catch (\Exception $e) { // a source failure: render the page without a target
+                $target = null;
+            }
+        }
 
         $this->response->html($this->helper->layout->config('ModMenuUpdater:updater/show', [
             'title' => t('ModMenu Updater'),
@@ -53,7 +60,7 @@ class UpdaterController extends BaseController
 
             $version = $bootstrapper->installZip($tmp, PLUGINS_DIR);
             $this->flash->success(t('ModMenu %s is installed. Remove ModMenuUpdater from ModMenu → Installed.', $version));
-        } catch (\Exception $e) { // ModMenuException, or a transport error
+        } catch (\Throwable $e) { // ModMenuException, a transport error, or a ParseError from a corrupt staged PluginSwap.php
             $this->flash->failure($e->getMessage());
         } finally {
             if ($tmp !== null && $tmp !== false) {
