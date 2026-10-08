@@ -41,6 +41,10 @@ class Bootstrapper extends Base
      */
     public function installZip(string $zipPath, string $pluginsDir): string
     {
+        // Load the exception class now: once the swap moves the current ModMenu
+        // aside, autoloading it from plugins/ModMenu would fail.
+        class_exists(ModMenuException::class);
+
         $pluginsDir = rtrim($pluginsDir, '/');
         $state = $this->state($pluginsDir);
 
