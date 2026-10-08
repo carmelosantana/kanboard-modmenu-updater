@@ -1,0 +1,13 @@
+{
+    "name": "ModMenuUpdater",
+    "version": "1.0.0",
+    "description": "One-shot helper: upgrades ModMenu older than 1.3.0 to the self-updating version, then can be removed.",
+    "author": "Carmelo Santana",
+    "homepage": "https://github.com/carmelosantana/kanboard-modmenu-updater",
+    "license": "MIT",
+    "compatible_version": ">=1.2.47",
+    "php_version": ">=8.4",
+    "requires": [
+        {"plugin": "ModMenu", "min_version": "1.1.0", "reason": "Uses ModMenu's directory sources and archive checks."}
+    ]
+}
