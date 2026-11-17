@@ -14,7 +14,8 @@ use Kanboard\Plugin\ModMenu\Model\PluginSwap;
  * Compatibility rule: this runs while the OLD ModMenu is active, so it uses
  * only ModMenu API that exists unchanged in 1.1.0 (PluginArchive::inspect /
  * extractTo, DirectoryClient::catalogMap, ModMenuException). PluginSwap is not
- * in 1.1.0: it is require_once'd from the staged new release.
+ * in 1.1.0: it is require_once'd from the staged new release, after
+ * preflight() has checked that copy without running it.
  */
 class Bootstrapper extends Base
 {
@@ -71,9 +72,8 @@ class Bootstrapper extends Base
             if (! is_file($swapFile)) {
                 throw new ModMenuException(t('This ModMenu release does not support self-update (it has no Model/PluginSwap.php).'));
             }
-            if (! class_exists(PluginSwap::class)) {
-                require_once $swapFile;
-            }
+            $this->preflight($staged, $state['installed'] ?? '0.0.0');
+            $this->loadSwapClass($swapFile);
 
             $swap = new PluginSwap($pluginsDir);
             $version = $swap->verify($staged, self::NAME, $state['installed'] ?? '0.0.0');
@@ -86,6 +86,56 @@ class Bootstrapper extends Base
             } else {
                 $this->removeTree($staging);
             }
+        }
+    }
+
+    /**
+     * Check the staged copy without running any of it: Plugin.php declares the
+     * ModMenu namespace, Model/PluginSwap.php declares the PluginSwap class,
+     * plugin.json is newer than the installed copy, and every .php file parses.
+     *
+     * @throws ModMenuException
+     */
+    private function preflight(string $staged, string $installed): void
+    {
+        $plugin = (string) @file_get_contents($staged . '/Plugin.php');
+        if (preg_match('/^\s*namespace\s+Kanboard\\\\Plugin\\\\ModMenu\s*;/m', $plugin) !== 1) {
+            throw new ModMenuException(t('The new ModMenu Plugin.php does not declare namespace Kanboard\\Plugin\\ModMenu.'));
+        }
+
+        $swap = (string) @file_get_contents($staged . '/Model/PluginSwap.php');
+        if (preg_match('/^\s*namespace\s+Kanboard\\\\Plugin\\\\ModMenu\\\\Model\s*;/m', $swap) !== 1
+            || preg_match('/^\s*(?:final\s+)?class\s+PluginSwap\b/m', $swap) !== 1) {
+            throw new ModMenuException(t('The new ModMenu Model/PluginSwap.php does not declare the PluginSwap class.'));
+        }
+
+        $version = $this->readVersion($staged);
+        if ($version === null || ! version_compare($version, $installed, '>')) {
+            throw new ModMenuException(t('The new ModMenu (%s) is not newer than the installed version (%s).', $version ?? '?', $installed));
+        }
+
+        if (! extension_loaded('tokenizer')) {
+            return;
+        }
+        $files = new \RecursiveIteratorIterator(new \RecursiveDirectoryIterator($staged, \FilesystemIterator::SKIP_DOTS));
+        foreach ($files as $file) {
+            if (! $file->isFile() || strtolower($file->getExtension()) !== 'php') {
+                continue;
+            }
+            try {
+                token_get_all((string) file_get_contents($file->getPathname()), TOKEN_PARSE);
+            } catch (\ParseError $e) {
+                $rel = substr($file->getPathname(), strlen($staged) + 1);
+                throw new ModMenuException(t('The new ModMenu has a syntax error in %s on line %d.', $rel, $e->getLine()));
+            }
+        }
+    }
+
+    /** Load PluginSwap from the staged copy, once preflight() has passed. */
+    protected function loadSwapClass(string $file): void
+    {
+        if (! class_exists(PluginSwap::class)) {
+            require_once $file;
         }
     }
 

@@ -7,6 +7,18 @@ use Kanboard\Plugin\ModMenuUpdater\Model\Bootstrapper;
 use Kanboard\Plugin\ModMenu\Exception\ModMenuException;
 use Kanboard\Plugin\ModMenu\Model\PluginSwap;
 
+/** Records whether the staged PluginSwap.php would have been loaded. */
+class RecordingBootstrapper extends Bootstrapper
+{
+    public array $loaded = [];
+
+    protected function loadSwapClass(string $file): void
+    {
+        $this->loaded[] = $file;
+        parent::loadSwapClass($file);
+    }
+}
+
 class BootstrapperTest extends Base
 {
     private string $work;
@@ -184,5 +196,82 @@ class BootstrapperTest extends Base
     {
         $this->expectException(ModMenuException::class);
         $this->bootstrapper()->downloadUrl(['ModMenu' => ['version' => '1.3.0']]);
+    }
+
+    // ── the staged copy is checked before any of its code is loaded ────────
+
+    private function makeCustomZip(string $version, string $pluginPhp, string $swapPhp): string
+    {
+        $path = $this->work . '/custom-' . bin2hex(random_bytes(3)) . '.zip';
+        $zip = new ZipArchive();
+        $zip->open($path, ZipArchive::CREATE);
+        $zip->addFromString('ModMenu/Plugin.php', $pluginPhp);
+        $zip->addFromString('ModMenu/plugin.json', json_encode(['name' => 'ModMenu', 'version' => $version]));
+        $zip->addFromString('ModMenu/Model/PluginSwap.php', $swapPhp);
+        $zip->close();
+        return $path;
+    }
+
+    private function realSwap(): string
+    {
+        return (string) file_get_contents((new ReflectionClass(PluginSwap::class))->getFileName());
+    }
+
+    private function assertRefusedBeforeLoad(string $zip, string $message): void
+    {
+        $b = new RecordingBootstrapper($this->container);
+        try {
+            $b->installZip($zip, $this->plugins);
+            $this->fail('expected ModMenuException');
+        } catch (ModMenuException $e) {
+            $this->assertStringContainsString($message, $e->getMessage());
+        }
+        $this->assertSame([], $b->loaded, 'no staged code may be loaded before the checks pass');
+        $this->assertSame('1.1.0', $this->installedVersion());
+        $this->assertSame([], $this->stagingDirs());
+    }
+
+    public function testStagedCopyThatIsNotNewerIsRefusedBeforeLoading()
+    {
+        $this->seedInstalled('1.1.0');
+        $this->assertRefusedBeforeLoad(
+            $this->makeCustomZip('1.0.0', "<?php\nnamespace Kanboard\\Plugin\\ModMenu;\n", $this->realSwap()),
+            'not newer'
+        );
+    }
+
+    public function testStagedCopyWithWrongNamespaceIsRefusedBeforeLoading()
+    {
+        $this->seedInstalled('1.1.0');
+        $this->assertRefusedBeforeLoad(
+            $this->makeCustomZip('9.9.9', "<?php\nnamespace Other;\n", $this->realSwap()),
+            'namespace'
+        );
+    }
+
+    public function testStagedSwapThatIsNotThePluginSwapClassIsRefusedBeforeLoading()
+    {
+        $this->seedInstalled('1.1.0');
+        $this->assertRefusedBeforeLoad(
+            $this->makeCustomZip('9.9.9', "<?php\nnamespace Kanboard\\Plugin\\ModMenu;\n", "<?php\nnamespace Elsewhere;\nclass Thing {}\n"),
+            'PluginSwap'
+        );
+    }
+
+    public function testStagedSwapWithSyntaxErrorIsRefusedBeforeLoading()
+    {
+        $this->seedInstalled('1.1.0');
+        $this->assertRefusedBeforeLoad(
+            $this->makeCustomZip('9.9.9', "<?php\nnamespace Kanboard\\Plugin\\ModMenu;\n", "<?php\nnamespace Kanboard\\Plugin\\ModMenu\\Model;\nclass PluginSwap { function ( }\n"),
+            'syntax'
+        );
+    }
+
+    public function testValidStagedCopyIsLoadedOnce()
+    {
+        $this->seedInstalled('1.1.0');
+        $b = new RecordingBootstrapper($this->container);
+        $this->assertSame('9.9.9', $b->installZip($this->makeZip(), $this->plugins));
+        $this->assertCount(1, $b->loaded);
     }
 }
