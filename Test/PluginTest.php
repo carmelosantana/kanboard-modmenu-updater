@@ -14,7 +14,7 @@ class PluginTest extends Base
 
     public function testPluginVersionValue()
     {
-        $this->assertSame('1.0.0', (new Plugin($this->container))->getPluginVersion());
+        $this->assertSame('1.0.1', (new Plugin($this->container))->getPluginVersion());
     }
 
     public function testCompatibleVersion()
