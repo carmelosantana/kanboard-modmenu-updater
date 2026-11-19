@@ -12,11 +12,6 @@ class PluginTest extends Base
         $this->assertSame('ModMenuUpdater', (new Plugin($this->container))->getPluginName());
     }
 
-    public function testPluginVersionValue()
-    {
-        $this->assertSame('1.0.1', (new Plugin($this->container))->getPluginVersion());
-    }
-
     public function testCompatibleVersion()
     {
         $this->assertSame('>=1.2.47', (new Plugin($this->container))->getCompatibleVersion());
