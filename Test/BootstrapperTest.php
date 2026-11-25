@@ -274,4 +274,69 @@ class BootstrapperTest extends Base
         $this->assertSame('9.9.9', $b->installZip($this->makeZip(), $this->plugins));
         $this->assertCount(1, $b->loaded);
     }
+
+    // ── fetchArchive: https only, size cap, sha256 pin ─────────────────────
+
+    private function fileUrl(int $bytes): string
+    {
+        $path = $this->work . '/src.zip';
+        file_put_contents($path, str_repeat('m', $bytes));
+        return 'file://' . $path;
+    }
+
+    private function catalogFor(string $url, ?string $sha256 = null): array
+    {
+        return ['ModMenu' => array_filter(['version' => '9.9.9', 'download' => $url, 'sha256' => $sha256])];
+    }
+
+    public function testFetchArchiveRefusesNonHttpsTransportsByDefault()
+    {
+        // downloadUrl() checks the first URL; the transport itself must also refuse other schemes (redirect targets).
+        $this->expectException(ModMenuException::class);
+        $this->bootstrapper()->fetchUrl($this->fileUrl(10), $this->work . '/out.zip');
+    }
+
+    public function testFetchArchiveStopsAtTheCapAndLeavesNoFile()
+    {
+        $dest = $this->work . '/out.zip';
+        try {
+            $this->bootstrapper()->setTransport(CURLPROTO_FILE, 1024)->fetchUrl($this->fileUrl(4096), $dest);
+            $this->fail('an archive over the cap must be refused');
+        } catch (ModMenuException $e) {
+            $this->assertStringContainsString('too large', $e->getMessage());
+        }
+        $this->assertFileDoesNotExist($dest);
+    }
+
+    public function testFetchArchiveDownloadsWithinTheCap()
+    {
+        $dest = $this->work . '/out.zip';
+        $this->bootstrapper()->setTransport(CURLPROTO_FILE, 1024)->fetchUrl($this->fileUrl(1000), $dest);
+        $this->assertSame(1000, filesize($dest));
+    }
+
+    public function testVerifyChecksumRefusesAMismatch()
+    {
+        $file = $this->work . '/a.zip';
+        file_put_contents($file, 'archive');
+        $this->expectException(ModMenuException::class);
+        $this->bootstrapper()->verifyChecksum($this->catalogFor('https://x/m.zip', str_repeat('0', 64)), $file);
+    }
+
+    public function testVerifyChecksumAcceptsAMatchAndAnUnpinnedEntry()
+    {
+        $file = $this->work . '/a.zip';
+        file_put_contents($file, 'archive');
+        $this->bootstrapper()->verifyChecksum($this->catalogFor('https://x/m.zip', strtoupper(hash('sha256', 'archive'))), $file);
+        $this->bootstrapper()->verifyChecksum($this->catalogFor('https://x/m.zip'), $file);
+        $this->addToAssertionCount(1);
+    }
+
+    public function testVerifyChecksumRefusesAMalformedPin()
+    {
+        $file = $this->work . '/a.zip';
+        file_put_contents($file, 'archive');
+        $this->expectException(ModMenuException::class);
+        $this->bootstrapper()->verifyChecksum($this->catalogFor('https://x/m.zip', 'nope'), $file);
+    }
 }

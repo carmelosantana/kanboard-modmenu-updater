@@ -4,7 +4,6 @@ namespace Kanboard\Plugin\ModMenuUpdater\Controller;
 
 use Kanboard\Controller\BaseController;
 use Kanboard\Core\Controller\AccessForbiddenException;
-use Kanboard\Plugin\ModMenu\Exception\ModMenuException;
 use Kanboard\Plugin\ModMenu\Model\DirectoryClient;
 use Kanboard\Plugin\ModMenuUpdater\Model\Bootstrapper;
 
@@ -50,13 +49,9 @@ class UpdaterController extends BaseController
         $bootstrapper = new Bootstrapper($this->container);
         $tmp = null;
         try {
-            $url = $bootstrapper->downloadUrl((new DirectoryClient($this->container))->catalogMap());
-            $body = $this->httpClient->get($url);
-            if (empty($body)) {
-                throw new ModMenuException(t('Unable to download the ModMenu archive.'));
-            }
+            $catalog = (new DirectoryClient($this->container))->catalogMap();
             $tmp = tempnam(sys_get_temp_dir(), 'modmenu_updater');
-            file_put_contents($tmp, $body);
+            $bootstrapper->fetchArchive($catalog, $tmp);
 
             $version = $bootstrapper->installZip($tmp, PLUGINS_DIR);
             $this->flash->success(t('ModMenu %s is installed. Remove ModMenuUpdater from ModMenu → Installed.', $version));

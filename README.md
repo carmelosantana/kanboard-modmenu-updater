@@ -24,7 +24,7 @@ From then on ModMenu updates itself from Browse.
 
 | Step | Detail |
 |---|---|
-| Find the release | Reads ModMenu from your ModMenu directory sources (the download must be `https://`). |
+| Find the release | Reads ModMenu from your ModMenu directory sources (the download must be `https://`, redirects included, at most 50 MB; when the entry has a `sha256`, the archive must match it). |
 | Check the archive | Uses the installed ModMenu's archive checks; the archive's single top-level folder must be `ModMenu`. |
 | Stage | Extracts to `plugins/.modmenu-staging-<random>/` (dot folders are never loaded by Kanboard). |
 | Verify and swap | Loads `Model/PluginSwap.php` from the staged release and uses it to verify the copy (newer version, every `.php` file parses, `php_version`, `compatible_version`) and rename it into place. |
