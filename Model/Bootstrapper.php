@@ -156,6 +156,85 @@ class Bootstrapper extends Base
         return $url;
     }
 
+    /** The ModMenu archive cap, the same 50 MB ModMenu applies to the archives it installs. */
+    public const MAX_ARCHIVE_BYTES = 52428800;
+
+    private int $protocols = CURLPROTO_HTTPS;
+    private int $maxBytes = self::MAX_ARCHIVE_BYTES;
+
+    /** Test seam: which curl protocols fetchUrl() allows, and its byte cap. */
+    public function setTransport(int $protocols, int $maxBytes): self
+    {
+        $this->protocols = $protocols;
+        $this->maxBytes = $maxBytes;
+        return $this;
+    }
+
+    /** Download the catalog's ModMenu archive to $dest and check its sha256 pin, if the entry has one. */
+    public function fetchArchive(array $catalog, string $dest): void
+    {
+        $this->fetchUrl($this->downloadUrl($catalog), $dest);
+        $this->verifyChecksum($catalog, $dest);
+    }
+
+    /**
+     * Stream $url to $dest: https only on the first request and every redirect (core's client follows
+     * redirects to any scheme), and stop at the byte cap rather than buffering the whole body.
+     * On failure nothing is left at $dest.
+     */
+    public function fetchUrl(string $url, string $dest): void
+    {
+        $out = fopen($dest, 'wb');
+        if ($out === false) {
+            throw new ModMenuException(t('Unable to download the ModMenu archive.'));
+        }
+        $written = 0;
+        $tooLarge = false;
+        $ch = curl_init($url);
+        curl_setopt_array($ch, [
+            CURLOPT_PROTOCOLS       => $this->protocols,
+            CURLOPT_REDIR_PROTOCOLS => $this->protocols,
+            CURLOPT_FOLLOWLOCATION  => true,
+            CURLOPT_MAXREDIRS       => 5,
+            CURLOPT_TIMEOUT         => 120,
+            CURLOPT_FAILONERROR     => true,
+            CURLOPT_USERAGENT       => 'Kanboard ModMenuUpdater',
+            CURLOPT_WRITEFUNCTION   => function ($ch, string $chunk) use ($out, &$written, &$tooLarge): int {
+                $written += strlen($chunk);
+                if ($written > $this->maxBytes) {
+                    $tooLarge = true;
+                    return 0;
+                }
+                return (int) fwrite($out, $chunk);
+            },
+        ]);
+        $ok = curl_exec($ch);
+        curl_close($ch);
+        fclose($out);
+        if ($ok === true && $written > 0) {
+            return;
+        }
+        @unlink($dest);
+        throw new ModMenuException($tooLarge
+            ? t('The ModMenu archive is too large (over %d MB).', intdiv($this->maxBytes, 1048576) ?: 1)
+            : t('Unable to download the ModMenu archive.'));
+    }
+
+    /** Refuse $file when the catalog's ModMenu entry pins a sha256 it does not match (or a malformed one). */
+    public function verifyChecksum(array $catalog, string $file): void
+    {
+        $pin = $catalog[self::NAME]['sha256'] ?? null;
+        if ($pin === null) {
+            return;
+        }
+        if (! is_string($pin) || ! preg_match('/^[0-9a-f]{64}$/i', $pin)) {
+            throw new ModMenuException(t('The directory lists an invalid checksum for ModMenu. Nothing was installed.'));
+        }
+        if (! hash_equals(strtolower($pin), (string) hash_file('sha256', $file))) {
+            throw new ModMenuException(t('The downloaded ModMenu archive does not match the checksum in the directory. Nothing was installed.'));
+        }
+    }
+
     private function readVersion(string $pluginDir): ?string
     {
         $file = $pluginDir . '/plugin.json';
